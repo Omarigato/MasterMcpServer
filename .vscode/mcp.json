@@ -6,11 +6,12 @@
 			"args": [
 				"run",
 				"--project",
-				"C:\\Users\\o.akim\\Documents\\MasterMcpServer\\MasterMcpServer.csproj"
+				"C:\\Users\\o.akim\\Documents\\MasterMcpServer\\MasterMCPServer.csproj"
 			],
 			"env": {
 				"ASPNETCORE_ENVIRONMENT": "Development",
-				"MASTER_MCP_LOG_LEVEL": "Information"
+				"MASTER_MCP_LOG_LEVEL": "Information",
+				"MASTER_MCP_SERVER_PATH": "C:\\Users\\o.akim\\Documents\\MasterMcpServer"
 			}
 		}
 	},

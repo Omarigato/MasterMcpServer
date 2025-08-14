@@ -4,6 +4,7 @@ using ModelContextProtocol.Server;
 using MasterMcpServer.Models;
 using MasterMcpServer.Services;
 using Microsoft.Extensions.Logging;
+using System.Text;
 
 namespace MasterMcpServer.Tools;
 
@@ -14,6 +15,7 @@ public class MasterServerTools
     private readonly IMcpConfigManager _configManager;
     private readonly IServerCodeGenerator _codeGenerator;
     private readonly List<ServerDefinition> _servers = new();
+    private readonly string _masterServerPath;
 
     public MasterServerTools(
         ILogger<MasterServerTools> logger,
@@ -25,19 +27,30 @@ public class MasterServerTools
         _processManager = processManager;
         _configManager = configManager;
         _codeGenerator = codeGenerator;
+        
+        // Create MasterMcpServer directory structure
+        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _masterServerPath = Path.Combine(documentsPath, "Documents", "MasterMcpServer");
+        
+        // Ensure master directory exists
+        if (!Directory.Exists(_masterServerPath))
+        {
+            Directory.CreateDirectory(_masterServerPath);
+            _logger.LogInformation("Created MasterMcpServer directory: {Path}", _masterServerPath);
+        }
     }
 
     [McpServerTool]
-    [Description("Creates a complete new MCP server with specified functionality and automatically configures it.")]
+    [Description("🚀 Creates a complete new MCP server with specified functionality and automatically configures it. Creates project in MasterMcpServer/{ServerName} structure.")]
     public async Task<string> CreateMcpServer(
-        [Description("Name of the new server (e.g., 'Database', 'FileManager', 'EmailSender')")] string serverName,
+        [Description("Name of the new server (e.g., 'Weather', 'Racing', 'ChatBot')")] string serverName,
         [Description("Detailed description of what the server should do")] string description,
-        [Description("Type of server: database, api, files, email, weather, custom")] string serverType = "custom",
-        [Description("Comma-separated list of tools to create (e.g., 'GetUserData,CreateUser,DeleteUser')")] string tools = "")
+        [Description("Type of server: database, api, files, email, weather, gaming, chatbot, custom")] string serverType = "custom",
+        [Description("Comma-separated list of tools to create (e.g., 'GetWeather,GetForecast,GetAlerts')")] string tools = "")
     {
         try
         {
-            _logger.LogInformation("Creating new MCP server: {ServerName}", serverName);
+            _logger.LogInformation("🚀 Creating new MCP server: {ServerName}", serverName);
 
             var spec = new ServerSpec
             {
@@ -47,15 +60,15 @@ public class MasterServerTools
                 Tools = ParseToolsFromString(tools, description)
             };
 
-            var outputPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents");
-            var projectPath = await _codeGenerator.GenerateFullServerProjectAsync(spec, outputPath);
+            // Create server in MasterMcpServer/{ServerName} structure
+            var projectPath = await _codeGenerator.GenerateFullServerProjectAsync(spec, _masterServerPath);
             
             var server = new ServerDefinition
             {
                 Name = serverName,
                 DisplayName = $"{serverName} MCP Server",
                 Description = description,
-                ProjectPath = Path.Combine(projectPath, $"{serverName}McpServer.csproj"),
+                ProjectPath = Path.Combine(projectPath, $"{serverName}.csproj"),
                 Status = ServerStatus.Stopped,
                 Tags = new List<string> { serverType, "generated", "auto-created" }
             };
@@ -68,29 +81,47 @@ public class MasterServerTools
             // Try to build the project
             var buildResult = await BuildServerProject(projectPath);
 
-            return $"🎉 **MCP Server Created Successfully!**\n\n" +
-                   $"📝 **Server Name:** {serverName}\n" +
-                   $"📋 **Description:** {description}\n" +
-                   $"📁 **Project Path:** {projectPath}\n" +
-                   $"🔧 **Type:** {serverType}\n" +
-                   $"🛠️ **Tools Created:** {spec.Tools.Count}\n\n" +
-                   $"📦 **Build Status:** {(buildResult ? "✅ Success" : "⚠️ Manual build required")}\n" +
-                   $"⚙️ **VS Code Config:** Updated automatically\n\n" +
-                   $"🚀 **Next Steps:**\n" +
-                   $"1. Restart VS Code to load the new server\n" +
-                   $"2. Or use `StartServer` to run it immediately\n" +
-                   $"3. Test the server with the generated tools\n\n" +
-                   $"💡 **Generated Tools:** {string.Join(", ", spec.Tools.Select(t => t.Name))}";
+            return $"""
+                🎉 **MCP Server Created Successfully!**
+                
+                📝 **Server Name:** {serverName}
+                📋 **Description:** {description}
+                📁 **Project Path:** {projectPath}
+                🏗️ **Structure:** MasterMcpServer/{serverName}/
+                🔧 **Type:** {serverType}
+                🛠️ **Tools Created:** {spec.Tools.Count}
+                
+                📦 **Build Status:** {(buildResult ? "✅ Success" : "⚠️ Manual build required")}
+                ⚙️ **VS Code Config:** Updated automatically
+                
+                🚀 **Next Steps:**
+                1. Use `StartServer {serverName}` to run it immediately
+                2. Or restart VS Code to load the new server
+                3. Test the server with the generated tools
+                
+                💡 **Generated Tools:** {string.Join(", ", spec.Tools.Select(t => t.Name))}
+                
+                📂 **Project Structure:**
+                ```
+                MasterMcpServer/
+                ├── {serverName}/
+                │   ├── Tools/
+                │   ├── Models/
+                │   ├── Services/
+                │   ├── .mcp/
+                │   └── .vscode/
+                ```
+                """;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating MCP server: {ServerName}", serverName);
+            _logger.LogError(ex, "❌ Error creating MCP server: {ServerName}", serverName);
             return $"❌ **Error creating server:** {ex.Message}";
         }
     }
 
     [McpServerTool]
-    [Description("Starts a previously created or configured MCP server.")]
+    [Description("⚡ Starts a previously created or configured MCP server from the MasterMcpServer ecosystem.")]
     public async Task<string> StartServer(
         [Description("Name of the server to start")] string serverName)
     {
@@ -99,7 +130,36 @@ public class MasterServerTools
             var server = _servers.FirstOrDefault(s => s.Name.Equals(serverName, StringComparison.OrdinalIgnoreCase));
             if (server == null)
             {
-                return $"❌ **Server not found:** {serverName}\n\nAvailable servers: {string.Join(", ", _servers.Select(s => s.Name))}";
+                // Try to find server in the MasterMcpServer directory
+                var serverPath = Path.Combine(_masterServerPath, serverName);
+                if (Directory.Exists(serverPath))
+                {
+                    var csprojPath = Path.Combine(serverPath, $"{serverName}.csproj");
+                    if (File.Exists(csprojPath))
+                    {
+                        server = new ServerDefinition
+                        {
+                            Name = serverName,
+                            DisplayName = $"{serverName} MCP Server",
+                            Description = $"Auto-discovered {serverName} server",
+                            ProjectPath = csprojPath,
+                            Status = ServerStatus.Stopped
+                        };
+                        _servers.Add(server);
+                    }
+                }
+                
+                if (server == null)
+                {
+                    return $"""
+                        ❌ **Server not found:** {serverName}
+                        
+                        📁 **Available servers in MasterMcpServer:**
+                        {string.Join("\n", GetAvailableServers())}
+                        
+                        💡 Use `CreateMcpServer` to create a new server first!
+                        """;
+                }
             }
 
             if (await _processManager.IsServerRunningAsync(serverName))
@@ -111,12 +171,17 @@ public class MasterServerTools
             
             if (success)
             {
-                return $"✅ **Server started successfully!**\n\n" +
-                       $"🚀 **Server:** {serverName}\n" +
-                       $"📊 **Status:** Running\n" +
-                       $"🆔 **Process ID:** {server.ProcessId}\n" +
-                       $"⏰ **Started:** {server.LastStarted:HH:mm:ss}\n\n" +
-                       $"🎯 **Ready to accept commands in VS Code chat!**";
+                return $"""
+                    ✅ **Server started successfully!**
+                    
+                    🚀 **Server:** {serverName}
+                    📊 **Status:** Running
+                    🆔 **Process ID:** {server.ProcessId}
+                    ⏰ **Started:** {server.LastStarted:HH:mm:ss}
+                    📁 **Location:** MasterMcpServer/{serverName}/
+                    
+                    🎯 **Ready to accept commands in VS Code chat!**
+                    """;
             }
             else
             {
@@ -131,7 +196,7 @@ public class MasterServerTools
     }
 
     [McpServerTool]
-    [Description("Stops a running MCP server gracefully.")]
+    [Description("🛑 Stops a running MCP server gracefully.")]
     public async Task<string> StopServer(
         [Description("Name of the server to stop")] string serverName)
     {
@@ -156,7 +221,7 @@ public class MasterServerTools
     }
 
     [McpServerTool]
-    [Description("Restarts an MCP server (stops and starts it again).")]
+    [Description("🔄 Restarts an MCP server (stops and starts it again) with updated configuration.")]
     public async Task<string> RestartServer(
         [Description("Name of the server to restart")] string serverName)
     {
@@ -166,8 +231,12 @@ public class MasterServerTools
             
             if (success)
             {
-                return $"🔄 **Server restarted successfully:** {serverName}\n\n" +
-                       $"✅ Ready to use with updated configuration!";
+                return $"""
+                    🔄 **Server restarted successfully:** {serverName}
+                    
+                    ✅ Ready to use with updated configuration!
+                    📁 Location: MasterMcpServer/{serverName}/
+                    """;
             }
             else
             {
@@ -182,19 +251,36 @@ public class MasterServerTools
     }
 
     [McpServerTool]
-    [Description("Shows the status and metrics of all managed MCP servers.")]
+    [Description("📊 Shows the status and metrics of all managed MCP servers in the ecosystem.")]
     public async Task<string> GetServerStatus()
     {
         try
         {
+            // Discover servers in MasterMcpServer directory
+            await DiscoverServersInDirectory();
+            
             var metrics = await _processManager.GetAllServerMetricsAsync();
             
             if (!_servers.Any())
             {
-                return "📭 **No servers configured yet.**\n\nUse `CreateMcpServer` to create your first server!";
+                return $"""
+                    📭 **No servers configured yet.**
+                    
+                    📁 **MasterMcpServer Path:** {_masterServerPath}
+                    
+                    🚀 Use `CreateMcpServer` to create your first server!
+                    
+                    **Example:**
+                    ```
+                    CreateMcpServer Weather "Advanced weather service" weather "GetWeather,GetForecast,GetAlerts"
+                    ```
+                    """;
             }
 
-            var result = "🖥️ **MCP Server Status Dashboard**\n\n";
+            var result = new StringBuilder();
+            result.AppendLine("🖥️ **MCP Server Ecosystem Dashboard**");
+            result.AppendLine($"📁 **Master Path:** {_masterServerPath}");
+            result.AppendLine();
             
             foreach (var server in _servers)
             {
@@ -204,31 +290,31 @@ public class MasterServerTools
                 var statusIcon = isRunning ? "🟢" : "🔴";
                 var statusText = isRunning ? "Running" : "Stopped";
                 
-                result += $"{statusIcon} **{server.Name}**\n";
-                result += $"   📊 Status: {statusText}\n";
-                result += $"   📋 Description: {server.Description}\n";
-                result += $"   📁 Path: {Path.GetFileName(Path.GetDirectoryName(server.ProjectPath))}\n";
+                result.AppendLine($"{statusIcon} **{server.Name}**");
+                result.AppendLine($"   📊 Status: {statusText}");
+                result.AppendLine($"   📋 Description: {server.Description}");
+                result.AppendLine($"   📁 Path: MasterMcpServer/{server.Name}/");
                 
                 if (metric != null && isRunning)
                 {
-                    result += $"   💾 Memory: {metric.MemoryUsage:F1} MB\n";
-                    result += $"   🕐 Uptime: {metric.Uptime:hh\\:mm\\:ss}\n";
-                    result += $"   🧵 Threads: {metric.ThreadCount}\n";
+                    result.AppendLine($"   💾 Memory: {metric.MemoryUsage:F1} MB");
+                    result.AppendLine($"   🕐 Uptime: {metric.Uptime:hh\\:mm\\:ss}");
+                    result.AppendLine($"   🧵 Threads: {metric.ThreadCount}");
                 }
                 
                 if (isRunning)
                 {
-                    result += $"   🆔 PID: {server.ProcessId}\n";
-                    result += $"   ⏰ Started: {server.LastStarted:MMM dd, HH:mm:ss}\n";
+                    result.AppendLine($"   🆔 PID: {server.ProcessId}");
+                    result.AppendLine($"   ⏰ Started: {server.LastStarted:MMM dd, HH:mm:ss}");
                 }
                 
-                result += "\n";
+                result.AppendLine();
             }
 
-            result += $"📈 **Summary:** {_servers.Count} total servers, " +
-                     $"{_servers.Count(s => s.Status == ServerStatus.Running)} running";
+            var runningCount = _servers.Count(s => s.Status == ServerStatus.Running);
+            result.AppendLine($"📈 **Summary:** {_servers.Count} total servers, {runningCount} running");
             
-            return result;
+            return result.ToString();
         }
         catch (Exception ex)
         {
@@ -238,7 +324,7 @@ public class MasterServerTools
     }
 
     [McpServerTool]
-    [Description("Adds a new tool/capability to an existing MCP server.")]
+    [Description("🔧 Adds a new tool/capability to an existing MCP server in the ecosystem.")]
     public async Task<string> AddToolToServer(
         [Description("Name of the server to modify")] string serverName,
         [Description("Name of the new tool")] string toolName,
@@ -250,7 +336,7 @@ public class MasterServerTools
             var server = _servers.FirstOrDefault(s => s.Name.Equals(serverName, StringComparison.OrdinalIgnoreCase));
             if (server == null)
             {
-                return $"❌ **Server not found:** {serverName}";
+                return $"❌ **Server not found:** {serverName}\n\nUse `GetServerStatus` to see available servers.";
             }
 
             var tool = new ToolSpec
@@ -260,15 +346,25 @@ public class MasterServerTools
                 Parameters = ParseParametersFromString(parameters)
             };
 
-            var projectPath = Path.GetDirectoryName(server.ProjectPath);
-            await _codeGenerator.AddToolToServerAsync(tool, projectPath);
+            var projectDirectory = Path.GetDirectoryName(server.ProjectPath);
+            if (string.IsNullOrEmpty(projectDirectory))
+            {
+                return $"❌ **Invalid server project path:** {server.ProjectPath}";
+            }
 
-            return $"✅ **Tool added successfully!**\n\n" +
-                   $"🔧 **Tool:** {toolName}\n" +
-                   $"📝 **Description:** {toolDescription}\n" +
-                   $"🎯 **Server:** {serverName}\n\n" +
-                   $"🔄 **Next step:** Restart the server to use the new tool\n" +
-                   $"Use: `RestartServer {serverName}`";
+            await _codeGenerator.AddToolToServerAsync(tool, projectDirectory);
+
+            return $"""
+                ✅ **Tool added successfully!**
+                
+                🔧 **Tool:** {toolName}
+                📝 **Description:** {toolDescription}
+                🎯 **Server:** {serverName}
+                📁 **Location:** MasterMcpServer/{serverName}/
+                
+                🔄 **Next step:** Restart the server to use the new tool
+                Use: `RestartServer {serverName}`
+                """;
         }
         catch (Exception ex)
         {
@@ -278,7 +374,7 @@ public class MasterServerTools
     }
 
     [McpServerTool]
-    [Description("Updates the VS Code MCP configuration to include all managed servers.")]
+    [Description("⚙️ Updates the VS Code MCP configuration to include all managed servers from the ecosystem.")]
     public async Task<string> UpdateVSCodeConfig()
     {
         try
@@ -292,11 +388,16 @@ public class MasterServerTools
                 updatedCount++;
             }
 
-            return $"✅ **VS Code configuration updated!**\n\n" +
-                   $"📄 **Updated servers:** {updatedCount}\n" +
-                   $"💾 **Backup created:** Yes\n\n" +
-                   $"🔄 **Restart VS Code** to apply changes\n" +
-                   $"🎯 **All servers ready** for use in chat!";
+            return $"""
+                ✅ **VS Code configuration updated!**
+                
+                📄 **Updated servers:** {updatedCount}
+                💾 **Backup created:** Yes
+                📁 **Config location:** Documents/MasterMcpServer/.vscode/mcp.json
+                
+                🔄 **Restart VS Code** to apply changes
+                🎯 **All servers ready** for use in chat!
+                """;
         }
         catch (Exception ex)
         {
@@ -306,9 +407,9 @@ public class MasterServerTools
     }
 
     [McpServerTool]
-    [Description("Generates server project templates based on common use cases.")]
+    [Description("🎨 Generates server project templates based on common use cases for rapid development.")]
     public async Task<string> GenerateServerTemplate(
-        [Description("Template type: database, api, files, email, weather, social, crypto, ai")] string templateType,
+        [Description("Template type: database, api, files, email, weather, social, crypto, ai, gaming, chatbot")] string templateType,
         [Description("Custom name for the server")] string serverName = "")
     {
         try
@@ -328,6 +429,8 @@ public class MasterServerTools
                 "social" => CreateSocialServerSpec(serverName),
                 "crypto" => CreateCryptoServerSpec(serverName),
                 "ai" => CreateAiServerSpec(serverName),
+                "gaming" => CreateGamingServerSpec(serverName),
+                "chatbot" => CreateChatBotServerSpec(serverName),
                 _ => throw new ArgumentException($"Unknown template type: {templateType}")
             };
 
@@ -342,22 +445,136 @@ public class MasterServerTools
     }
 
     [McpServerTool]
-    [Description("Stops all running MCP servers managed by the Master server.")]
+    [Description("🛑 Emergency stop - Stops all running MCP servers managed by the Master server.")]
     public async Task<string> StopAllServers()
     {
         try
         {
             await _processManager.KillAllServersAsync();
             
-            return "🛑 **All servers stopped successfully!**\n\n" +
-                   "💡 Use `StartServer <name>` to restart individual servers\n" +
-                   "📊 Use `GetServerStatus` to check current status";
+            return """
+                🛑 **All servers stopped successfully!**
+                
+                💡 Use `StartServer <name>` to restart individual servers
+                📊 Use `GetServerStatus` to check current status
+                📁 All projects remain in MasterMcpServer/ directory
+                """;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error stopping all servers");
             return $"❌ **Error stopping servers:** {ex.Message}";
         }
+    }
+
+    [McpServerTool]
+    [Description("📁 Lists all servers in the MasterMcpServer ecosystem, including auto-discovered ones.")]
+    public async Task<string> ListServers()
+    {
+        try
+        {
+            await DiscoverServersInDirectory();
+            
+            var availableServers = GetAvailableServers();
+            
+            if (!availableServers.Any())
+            {
+                return $"""
+                    📭 **No servers found in ecosystem.**
+                    
+                    📁 **Master Path:** {_masterServerPath}
+                    
+                    🚀 **Create your first server:**
+                    ```
+                    CreateMcpServer Weather "Weather service" weather "GetWeather,GetForecast"
+                    ```
+                    """;
+            }
+
+            var result = new StringBuilder();
+            result.AppendLine("📁 **MasterMcpServer Ecosystem**");
+            result.AppendLine($"📂 **Location:** {_masterServerPath}");
+            result.AppendLine();
+            
+            foreach (var serverInfo in availableServers)
+            {
+                result.AppendLine($"📦 **{serverInfo}**");
+            }
+            
+            result.AppendLine();
+            result.AppendLine($"📈 **Total:** {availableServers.Count} servers available");
+            result.AppendLine("💡 Use `StartServer <name>` to run any server");
+            
+            return result.ToString();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error listing servers");
+            return $"❌ **Error listing servers:** {ex.Message}";
+        }
+    }
+
+    // Helper methods
+    private async Task DiscoverServersInDirectory()
+    {
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (!Directory.Exists(_masterServerPath))
+                    return;
+
+                var serverDirectories = Directory.GetDirectories(_masterServerPath);
+
+                foreach (var serverDir in serverDirectories)
+                {
+                    var serverName = Path.GetFileName(serverDir);
+
+                    // Skip hidden directories and the main config directory
+                    if (serverName.StartsWith(".") || serverName == ".vscode")
+                        continue;
+
+                    var csprojPath = Path.Combine(serverDir, $"{serverName}.csproj");
+
+                    if (File.Exists(csprojPath) && !_servers.Any(s => s.Name == serverName))
+                    {
+                        var server = new ServerDefinition
+                        {
+                            Name = serverName,
+                            DisplayName = $"{serverName} MCP Server",
+                            Description = $"Auto-discovered {serverName} server",
+                            ProjectPath = csprojPath,
+                            Status = ServerStatus.Stopped,
+                            Tags = new List<string> { "auto-discovered" }
+                        };
+
+                        _servers.Add(server);
+                        _logger.LogInformation("Auto-discovered server: {ServerName}", serverName);
+                    }
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error discovering servers in directory");
+        }
+    }
+
+    private List<string> GetAvailableServers()
+    {
+        var servers = new List<string>();
+        
+        if (Directory.Exists(_masterServerPath))
+        {
+            var directories = Directory.GetDirectories(_masterServerPath)
+                .Select(Path.GetFileName)
+                .Where(name => !string.IsNullOrEmpty(name) && !name.StartsWith("."))
+                .ToList();
+            
+            servers.AddRange(directories.Where(name => name != null)!);
+        }
+        
+        return servers;
     }
 
     private List<ToolSpec> ParseToolsFromString(string toolsString, string serverDescription)
@@ -520,7 +737,8 @@ public class MasterServerTools
         Tools = new List<ToolSpec>
         {
             new() { Name = "GetCurrentWeather", Description = "Get current weather", Parameters = new() { new() { Name = "city", Type = "string", Description = "City name" } } },
-            new() { Name = "GetForecast", Description = "Get weather forecast", Parameters = new() { new() { Name = "city", Type = "string", Description = "City name" }, new() { Name = "days", Type = "int", Description = "Number of days" } } }
+            new() { Name = "GetForecast", Description = "Get weather forecast", Parameters = new() { new() { Name = "city", Type = "string", Description = "City name" }, new() { Name = "days", Type = "int", Description = "Number of days" } } },
+            new() { Name = "GetWeatherAlerts", Description = "Get weather alerts", Parameters = new() { new() { Name = "region", Type = "string", Description = "Region for alerts" } } }
         }
     };
 
@@ -560,6 +778,34 @@ public class MasterServerTools
             new() { Name = "GenerateText", Description = "Generate text using AI", Parameters = new() { new() { Name = "prompt", Type = "string", Description = "Text generation prompt" } } },
             new() { Name = "AnalyzeImage", Description = "Analyze image content", Parameters = new() { new() { Name = "imageUrl", Type = "string", Description = "URL to image" } } },
             new() { Name = "TranslateText", Description = "Translate text", Parameters = new() { new() { Name = "text", Type = "string", Description = "Text to translate" }, new() { Name = "targetLanguage", Type = "string", Description = "Target language" } } }
+        }
+    };
+
+    private ServerSpec CreateGamingServerSpec(string name) => new()
+    {
+        Name = name,
+        Description = "Gaming server for creating interactive games and entertainment",
+        Type = "gaming",
+        Tools = new List<ToolSpec>
+        {
+            new() { Name = "CreateGame", Description = "Create a new game", Parameters = new() { new() { Name = "gameType", Type = "string", Description = "Type of game (racing, puzzle, rpg)" } } },
+            new() { Name = "StartGame", Description = "Start game session", Parameters = new() { new() { Name = "gameId", Type = "string", Description = "Game identifier" } } },
+            new() { Name = "GetGameState", Description = "Get current game state", Parameters = new() { new() { Name = "gameId", Type = "string", Description = "Game identifier" } } },
+            new() { Name = "MakeMove", Description = "Make a move in the game", Parameters = new() { new() { Name = "gameId", Type = "string", Description = "Game identifier" }, new() { Name = "move", Type = "string", Description = "Player move" } } }
+        }
+    };
+
+    private ServerSpec CreateChatBotServerSpec(string name) => new()
+    {
+        Name = name,
+        Description = "Intelligent chatbot server with conversation management",
+        Type = "chatbot",
+        Tools = new List<ToolSpec>
+        {
+            new() { Name = "SendMessage", Description = "Send message to chatbot", Parameters = new() { new() { Name = "message", Type = "string", Description = "User message" }, new() { Name = "userId", Type = "string", Description = "User identifier" } } },
+            new() { Name = "GetConversationHistory", Description = "Get conversation history", Parameters = new() { new() { Name = "userId", Type = "string", Description = "User identifier" } } },
+            new() { Name = "SetPersonality", Description = "Set chatbot personality", Parameters = new() { new() { Name = "personality", Type = "string", Description = "Personality description" } } },
+            new() { Name = "ClearConversation", Description = "Clear conversation history", Parameters = new() { new() { Name = "userId", Type = "string", Description = "User identifier" } } }
         }
     };
 }

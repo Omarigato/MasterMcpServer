@@ -11,8 +11,6 @@ public interface IMcpConfigManager
     Task<bool> UpdateServerConfigAsync(ServerDefinition server, string? configPath = null);
     Task<McpConfiguration> GetCurrentConfigAsync(string? configPath = null);
     Task<bool> BackupConfigAsync(string? configPath = null);
-    Task<bool> RestoreConfigAsync(string backupPath, string? configPath = null);
-    Task<List<string>> FindMcpConfigFilesAsync();
 }
 
 public class McpConfigManager : IMcpConfigManager
@@ -23,17 +21,26 @@ public class McpConfigManager : IMcpConfigManager
     public McpConfigManager(ILogger<McpConfigManager> logger)
     {
         _logger = logger;
-        _defaultConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), 
-                                         "Documents", "WeatherMcpServer", ".vscode", "mcp.json");
+        
+        // Create default config path in Documents/MasterMcpServer/.vscode/mcp.json
+        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _defaultConfigPath = Path.Combine(documentsPath, "Documents", "MasterMcpServer", ".vscode", "mcp.json");
+        
+        // Ensure directory exists
+        var directory = Path.GetDirectoryName(_defaultConfigPath);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
     }
 
     public async Task<bool> AddServerToConfigAsync(ServerDefinition server, string? configPath = null)
     {
         try
         {
-            configPath ??= _defaultConfigPath;
+            var actualConfigPath = configPath ?? _defaultConfigPath;
             
-            var config = await GetCurrentConfigAsync(configPath);
+            var config = await GetCurrentConfigAsync(actualConfigPath);
             
             var serverConfig = new ServerConfig
             {
@@ -46,7 +53,7 @@ public class McpConfigManager : IMcpConfigManager
 
             config.Servers[server.Name] = serverConfig;
 
-            await SaveConfigAsync(config, configPath);
+            await SaveConfigAsync(config, actualConfigPath);
             
             _logger.LogInformation("Added server {ServerName} to MCP configuration", server.Name);
             return true;
@@ -62,13 +69,13 @@ public class McpConfigManager : IMcpConfigManager
     {
         try
         {
-            configPath ??= _defaultConfigPath;
+            var actualConfigPath = configPath ?? _defaultConfigPath;
             
-            var config = await GetCurrentConfigAsync(configPath);
+            var config = await GetCurrentConfigAsync(actualConfigPath);
             
             if (config.Servers.Remove(serverName))
             {
-                await SaveConfigAsync(config, configPath);
+                await SaveConfigAsync(config, actualConfigPath);
                 _logger.LogInformation("Removed server {ServerName} from MCP configuration", serverName);
                 return true;
             }
@@ -92,17 +99,17 @@ public class McpConfigManager : IMcpConfigManager
     {
         try
         {
-            configPath ??= _defaultConfigPath;
+            var actualConfigPath = configPath ?? _defaultConfigPath;
             
-            if (!File.Exists(configPath))
+            if (!File.Exists(actualConfigPath))
             {
-                _logger.LogInformation("Configuration file not found, creating new one: {ConfigPath}", configPath);
+                _logger.LogInformation("Configuration file not found, creating new one: {ConfigPath}", actualConfigPath);
                 var newConfig = new McpConfiguration();
-                await SaveConfigAsync(newConfig, configPath);
+                await SaveConfigAsync(newConfig, actualConfigPath);
                 return newConfig;
             }
 
-            var json = await File.ReadAllTextAsync(configPath);
+            var json = await File.ReadAllTextAsync(actualConfigPath);
             var config = JsonSerializer.Deserialize<McpConfiguration>(json);
             
             return config ?? new McpConfiguration();
@@ -118,16 +125,16 @@ public class McpConfigManager : IMcpConfigManager
     {
         try
         {
-            configPath ??= _defaultConfigPath;
+            var actualConfigPath = configPath ?? _defaultConfigPath;
             
-            if (!File.Exists(configPath))
+            if (!File.Exists(actualConfigPath))
             {
-                _logger.LogWarning("Configuration file does not exist: {ConfigPath}", configPath);
+                _logger.LogWarning("Configuration file does not exist: {ConfigPath}", actualConfigPath);
                 return false;
             }
 
-            var backupPath = $"{configPath}.backup.{DateTime.UtcNow:yyyyMMdd_HHmmss}";
-            File.Copy(configPath, backupPath);
+            var backupPath = $"{actualConfigPath}.backup.{DateTime.UtcNow:yyyyMMdd_HHmmss}";
+            await Task.Run(() => File.Copy(actualConfigPath, backupPath));
             
             _logger.LogInformation("Configuration backed up to {BackupPath}", backupPath);
             return true;
@@ -138,68 +145,6 @@ public class McpConfigManager : IMcpConfigManager
             return false;
         }
     }
-
-    public async Task<bool> RestoreConfigAsync(string backupPath, string? configPath = null)
-    {
-        try
-        {
-            configPath ??= _defaultConfigPath;
-            
-            if (!File.Exists(backupPath))
-            {
-                _logger.LogError("Backup file does not exist: {BackupPath}", backupPath);
-                return false;
-            }
-
-            File.Copy(backupPath, configPath, overwrite: true);
-            
-            _logger.LogInformation("Configuration restored from {BackupPath}", backupPath);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error restoring configuration from {BackupPath}", backupPath);
-            return false;
-        }
-    }
-
-    public async Task<List<string>> FindMcpConfigFilesAsync()
-    {
-        var configFiles = new List<string>();
-        
-        try
-        {
-            // Search common VS Code locations
-            var searchPaths = new[]
-            {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "source"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "projects"),
-                Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
-            };
-
-            foreach (var searchPath in searchPaths)
-            {
-                if (Directory.Exists(searchPath))
-                {
-                    var files = Directory.GetFiles(searchPath, "mcp.json", SearchOption.AllDirectories)
-                                        .Where(f => f.Contains(".vscode"))
-                                        .ToList();
-                    configFiles.AddRange(files);
-                }
-            }
-
-            configFiles = configFiles.Distinct().ToList();
-            _logger.LogInformation("Found {Count} MCP configuration files", configFiles.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error searching for MCP configuration files");
-        }
-
-        return configFiles;
-    }
-
     private async Task SaveConfigAsync(McpConfiguration config, string configPath)
     {
         var directory = Path.GetDirectoryName(configPath);

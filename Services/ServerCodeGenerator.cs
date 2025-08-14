@@ -7,27 +7,39 @@ namespace MasterMcpServer.Services;
 public interface IServerCodeGenerator
 {
     Task<string> GenerateFullServerProjectAsync(ServerSpec spec, string outputPath);
-    Task<string> AddToolToServerAsync(ToolSpec tool, string? serverPath);
-    Task<string> GenerateProjectFileAsync(ServerSpec spec);
-    Task<string> GenerateProgramFileAsync(ServerSpec spec);
-    Task<string> GenerateToolsFileAsync(ServerSpec spec);
-    Task<string> GenerateReadmeAsync(ServerSpec spec);
+    Task<string> AddToolToServerAsync(ToolSpec tool, string serverPath);
+    string GenerateProjectFileAsync(ServerSpec spec);
+    string GenerateProgramFileAsync(ServerSpec spec);
+    string GenerateToolsFileAsync(ServerSpec spec);
+    string GenerateReadmeAsync(ServerSpec spec);
 }
 
 public class ServerCodeGenerator : IServerCodeGenerator
 {
     private readonly ILogger<ServerCodeGenerator> _logger;
+    private readonly string _defaultOutputPath;
 
     public ServerCodeGenerator(ILogger<ServerCodeGenerator> logger)
     {
         _logger = logger;
+        
+        // Set default output path to Documents/MasterMcpServer
+        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _defaultOutputPath = Path.Combine(documentsPath, "Documents", "MasterMcpServer");
+        
+        // Ensure directory exists
+        if (!Directory.Exists(_defaultOutputPath))
+        {
+            Directory.CreateDirectory(_defaultOutputPath);
+        }
     }
 
     public async Task<string> GenerateFullServerProjectAsync(ServerSpec spec, string outputPath)
     {
         try
         {
-            var projectPath = Path.Combine(outputPath, spec.Name);
+            var actualOutputPath = outputPath ?? _defaultOutputPath;
+            var projectPath = Path.Combine(actualOutputPath, spec.Name);
             
             if (Directory.Exists(projectPath))
             {
@@ -44,16 +56,16 @@ public class ServerCodeGenerator : IServerCodeGenerator
             Directory.CreateDirectory(Path.Combine(projectPath, ".vscode"));
 
             // Generate files
-            var csprojContent = await GenerateProjectFileAsync(spec);
+            var csprojContent = GenerateProjectFileAsync(spec);
             await File.WriteAllTextAsync(Path.Combine(projectPath, $"{spec.Name}.csproj"), csprojContent);
 
-            var programContent = await GenerateProgramFileAsync(spec);
+            var programContent = GenerateProgramFileAsync(spec);
             await File.WriteAllTextAsync(Path.Combine(projectPath, "Program.cs"), programContent);
 
-            var toolsContent = await GenerateToolsFileAsync(spec);
+            var toolsContent = GenerateToolsFileAsync(spec);
             await File.WriteAllTextAsync(Path.Combine(projectPath, "Tools", $"{spec.Name}Tools.cs"), toolsContent);
 
-            var readmeContent = await GenerateReadmeAsync(spec);
+            var readmeContent = GenerateReadmeAsync(spec);
             await File.WriteAllTextAsync(Path.Combine(projectPath, "README.md"), readmeContent);
 
             var mcpServerConfig = GenerateMcpServerConfig(spec);
@@ -72,11 +84,22 @@ public class ServerCodeGenerator : IServerCodeGenerator
         }
     }
 
-    public async Task<string> AddToolToServerAsync(ToolSpec tool, string? serverPath = null )
+    public async Task<string> AddToolToServerAsync(ToolSpec tool, string serverPath)
     {
         try
         {
+            if (string.IsNullOrEmpty(serverPath))
+            {
+                throw new ArgumentException("Server path cannot be null or empty", nameof(serverPath));
+            }
+
             var toolsFilePath = Path.Combine(serverPath, "Tools");
+            
+            if (!Directory.Exists(toolsFilePath))
+            {
+                throw new DirectoryNotFoundException($"Tools directory not found at: {toolsFilePath}");
+            }
+
             var toolsFiles = Directory.GetFiles(toolsFilePath, "*Tools.cs");
             
             if (!toolsFiles.Any())
@@ -102,7 +125,7 @@ public class ServerCodeGenerator : IServerCodeGenerator
         }
     }
 
-    public async Task<string> GenerateProjectFileAsync(ServerSpec spec)
+    public string GenerateProjectFileAsync(ServerSpec spec)
     {
         var packageId = $"{spec.Name}McpServer";
         
@@ -144,7 +167,7 @@ public class ServerCodeGenerator : IServerCodeGenerator
         """;
     }
 
-    public async Task<string> GenerateProgramFileAsync(ServerSpec spec)
+    public string GenerateProgramFileAsync(ServerSpec spec)
     {
         var className = $"{spec.Name}Tools";
         
@@ -169,7 +192,7 @@ public class ServerCodeGenerator : IServerCodeGenerator
         """;
     }
 
-    public async Task<string> GenerateToolsFileAsync(ServerSpec spec)
+    public string GenerateToolsFileAsync(ServerSpec spec)
     {
         var sb = new StringBuilder();
         
@@ -220,7 +243,7 @@ public class ServerCodeGenerator : IServerCodeGenerator
         return sb.ToString();
     }
 
-    public async Task<string> GenerateReadmeAsync(ServerSpec spec)
+    public string GenerateReadmeAsync(ServerSpec spec)
     {
         var sb = new StringBuilder();
         
