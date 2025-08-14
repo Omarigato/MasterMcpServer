@@ -1,0 +1,378 @@
+using System.Text;
+using MasterMcpServer.Models;
+using Microsoft.Extensions.Logging;
+
+namespace MasterMcpServer.Services;
+
+public interface IServerCodeGenerator
+{
+    Task<string> GenerateFullServerProjectAsync(ServerSpec spec, string outputPath);
+    Task<string> AddToolToServerAsync(ToolSpec tool, string? serverPath);
+    Task<string> GenerateProjectFileAsync(ServerSpec spec);
+    Task<string> GenerateProgramFileAsync(ServerSpec spec);
+    Task<string> GenerateToolsFileAsync(ServerSpec spec);
+    Task<string> GenerateReadmeAsync(ServerSpec spec);
+}
+
+public class ServerCodeGenerator : IServerCodeGenerator
+{
+    private readonly ILogger<ServerCodeGenerator> _logger;
+
+    public ServerCodeGenerator(ILogger<ServerCodeGenerator> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task<string> GenerateFullServerProjectAsync(ServerSpec spec, string outputPath)
+    {
+        try
+        {
+            var projectPath = Path.Combine(outputPath, spec.Name);
+            
+            if (Directory.Exists(projectPath))
+            {
+                Directory.Delete(projectPath, true);
+            }
+            
+            Directory.CreateDirectory(projectPath);
+
+            // Create directory structure
+            Directory.CreateDirectory(Path.Combine(projectPath, "Tools"));
+            Directory.CreateDirectory(Path.Combine(projectPath, "Models"));
+            Directory.CreateDirectory(Path.Combine(projectPath, "Services"));
+            Directory.CreateDirectory(Path.Combine(projectPath, ".mcp"));
+            Directory.CreateDirectory(Path.Combine(projectPath, ".vscode"));
+
+            // Generate files
+            var csprojContent = await GenerateProjectFileAsync(spec);
+            await File.WriteAllTextAsync(Path.Combine(projectPath, $"{spec.Name}.csproj"), csprojContent);
+
+            var programContent = await GenerateProgramFileAsync(spec);
+            await File.WriteAllTextAsync(Path.Combine(projectPath, "Program.cs"), programContent);
+
+            var toolsContent = await GenerateToolsFileAsync(spec);
+            await File.WriteAllTextAsync(Path.Combine(projectPath, "Tools", $"{spec.Name}Tools.cs"), toolsContent);
+
+            var readmeContent = await GenerateReadmeAsync(spec);
+            await File.WriteAllTextAsync(Path.Combine(projectPath, "README.md"), readmeContent);
+
+            var mcpServerConfig = GenerateMcpServerConfig(spec);
+            await File.WriteAllTextAsync(Path.Combine(projectPath, ".mcp", "server.json"), mcpServerConfig);
+
+            var gitignore = GenerateGitIgnore();
+            await File.WriteAllTextAsync(Path.Combine(projectPath, ".gitignore"), gitignore);
+
+            _logger.LogInformation("Generated full server project: {ProjectPath}", projectPath);
+            return projectPath;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating server project for {ServerName}", spec.Name);
+            throw;
+        }
+    }
+
+    public async Task<string> AddToolToServerAsync(ToolSpec tool, string? serverPath = null )
+    {
+        try
+        {
+            var toolsFilePath = Path.Combine(serverPath, "Tools");
+            var toolsFiles = Directory.GetFiles(toolsFilePath, "*Tools.cs");
+            
+            if (!toolsFiles.Any())
+            {
+                throw new InvalidOperationException("No tools file found in the server project");
+            }
+
+            var mainToolsFile = toolsFiles.First();
+            var existingContent = await File.ReadAllTextAsync(mainToolsFile);
+            
+            var newMethod = GenerateToolMethod(tool);
+            var updatedContent = InsertMethodIntoClass(existingContent, newMethod);
+            
+            await File.WriteAllTextAsync(mainToolsFile, updatedContent);
+            
+            _logger.LogInformation("Added tool {ToolName} to server at {ServerPath}", tool.Name, serverPath);
+            return mainToolsFile;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding tool {ToolName} to server at {ServerPath}", tool.Name, serverPath);
+            throw;
+        }
+    }
+
+    public async Task<string> GenerateProjectFileAsync(ServerSpec spec)
+    {
+        var packageId = $"{spec.Name}McpServer";
+        
+        return $"""
+        <Project Sdk="Microsoft.NET.Sdk">
+
+        	<PropertyGroup>
+        		<TargetFramework>net8.0</TargetFramework>
+        		<RollForward>Major</RollForward>
+        		<OutputType>Exe</OutputType>
+        		<Nullable>enable</Nullable>
+        		<ImplicitUsings>enable</ImplicitUsings>
+
+        		<PackAsTool>true</PackAsTool>
+        		<PackageType>McpServer</PackageType>
+
+        		<PackageReadmeFile>README.md</PackageReadmeFile>
+        		<PackageId>{packageId}</PackageId>
+        		<PackageVersion>1.0.0</PackageVersion>
+        		<PackageTags>AI; MCP; server; stdio; {spec.Type.ToLower()}</PackageTags>
+        		<Description>{spec.Description}</Description>
+        		<Authors>Generated by MasterMcpServer</Authors>
+        		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+        	</PropertyGroup>
+
+        	<ItemGroup>
+        		<None Include=".mcp\server.json" Pack="true" PackagePath="/.mcp/"/>
+        		<None Include="README.md" Pack="true" PackagePath="/"/>
+        	</ItemGroup>
+
+        	<ItemGroup>
+        		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-preview.6.25358.103"/>
+        		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0-preview.6.25358.103"/>
+        		<PackageReference Include="ModelContextProtocol" Version="0.3.0-preview.3"/>
+        		<PackageReference Include="System.Text.Json" Version="10.0.0-preview.6.25358.103"/>
+        	</ItemGroup>
+
+        </Project>
+        """;
+    }
+
+    public async Task<string> GenerateProgramFileAsync(ServerSpec spec)
+    {
+        var className = $"{spec.Name}Tools";
+        
+        return $"""
+        using Microsoft.Extensions.DependencyInjection;
+        using Microsoft.Extensions.Hosting;
+        using Microsoft.Extensions.Logging;
+        using {spec.Name}McpServer.Tools;
+
+        var builder = Host.CreateApplicationBuilder(args);
+
+        builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+
+        builder.Services.AddHttpClient();
+
+        builder.Services
+            .AddMcpServer()
+            .WithStdioServerTransport()
+            .WithTools<{className}>();
+
+        await builder.Build().RunAsync();
+        """;
+    }
+
+    public async Task<string> GenerateToolsFileAsync(ServerSpec spec)
+    {
+        var sb = new StringBuilder();
+        
+        sb.AppendLine("using System.ComponentModel;");
+        sb.AppendLine("using ModelContextProtocol.Server;");
+        sb.AppendLine("using Microsoft.Extensions.Logging;");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {spec.Name}McpServer.Tools;");
+        sb.AppendLine();
+        sb.AppendLine($"public class {spec.Name}Tools");
+        sb.AppendLine("{");
+        sb.AppendLine($"    private readonly ILogger<{spec.Name}Tools> _logger;");
+        sb.AppendLine("    private readonly HttpClient _httpClient;");
+        sb.AppendLine();
+        sb.AppendLine($"    public {spec.Name}Tools(ILogger<{spec.Name}Tools> logger, HttpClient httpClient)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        _logger = logger;");
+        sb.AppendLine("        _httpClient = httpClient;");
+        sb.AppendLine("    }");
+
+        // Generate tools
+        foreach (var tool in spec.Tools)
+        {
+            sb.AppendLine();
+            sb.AppendLine(GenerateToolMethod(tool));
+        }
+
+        // Add default example tool if no tools specified
+        if (!spec.Tools.Any())
+        {
+            sb.AppendLine();
+            sb.AppendLine("    [McpServerTool]");
+            sb.AppendLine($"    [Description(\"Example tool for {spec.Name} server\")]");
+            sb.AppendLine("    public async Task<string> ExampleTool(");
+            sb.AppendLine("        [Description(\"Input parameter\")] string input)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        _logger.LogInformation(\"ExampleTool called with input: {Input}\", input);");
+            sb.AppendLine("        ");
+            sb.AppendLine("        // TODO: Implement your logic here");
+            sb.AppendLine("        await Task.Delay(100);");
+            sb.AppendLine("        ");
+            sb.AppendLine($"        return $\"✅ {spec.Name} server processed: {{input}}\";");
+            sb.AppendLine("    }");
+        }
+
+        sb.AppendLine("}");
+        
+        return sb.ToString();
+    }
+
+    public async Task<string> GenerateReadmeAsync(ServerSpec spec)
+    {
+        var sb = new StringBuilder();
+        
+        sb.AppendLine($"# {spec.Name} MCP Server");
+        sb.AppendLine();
+        sb.AppendLine(spec.Description);
+        sb.AppendLine();
+        sb.AppendLine("## Features");
+        sb.AppendLine();
+        
+        foreach (var tool in spec.Tools)
+        {
+            sb.AppendLine($"- **{tool.Name}**: {tool.Description}");
+        }
+        
+        if (!spec.Tools.Any())
+        {
+            sb.AppendLine("- Example functionality (customize as needed)");
+        }
+        
+        sb.AppendLine();
+        sb.AppendLine("## Setup");
+        sb.AppendLine();
+        sb.AppendLine("1. Build the project:");
+        sb.AppendLine("   ```bash");
+        sb.AppendLine("   dotnet build");
+        sb.AppendLine("   ```");
+        sb.AppendLine();
+        sb.AppendLine("2. Run the server:");
+        sb.AppendLine("   ```bash");
+        sb.AppendLine("   dotnet run");
+        sb.AppendLine("   ```");
+        sb.AppendLine();
+        sb.AppendLine("## Configuration");
+        sb.AppendLine();
+        sb.AppendLine("Add to your VS Code `.vscode/mcp.json`:");
+        sb.AppendLine();
+        sb.AppendLine("```json");
+        sb.AppendLine("{");
+        sb.AppendLine("  \"servers\": {");
+        sb.AppendLine($"    \"{spec.Name.ToLower()}-server\": {{");
+        sb.AppendLine("      \"type\": \"stdio\",");
+        sb.AppendLine("      \"command\": \"dotnet\",");
+        sb.AppendLine("      \"args\": [\"run\", \"--project\", \"path/to/project\"]");
+        sb.AppendLine("    }");
+        sb.AppendLine("  }");
+        sb.AppendLine("}");
+        sb.AppendLine("```");
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine("*Generated by MasterMcpServer*");
+        
+        return sb.ToString();
+    }
+
+    private string GenerateToolMethod(ToolSpec tool)
+    {
+        var sb = new StringBuilder();
+        
+        sb.AppendLine("    [McpServerTool]");
+        sb.AppendLine($"    [Description(\"{tool.Description}\")]");
+        sb.Append($"    public async Task<{tool.ReturnType}> {tool.Name}(");
+        
+        // Generate parameters
+        var parameters = tool.Parameters.Select(p => 
+        {
+            var defaultValue = string.IsNullOrEmpty(p.DefaultValue) ? "" : $" = {p.DefaultValue}";
+            var nullable = p.Required ? "" : "?";
+            return $"[Description(\"{p.Description}\")] {p.Type}{nullable} {p.Name}{defaultValue}";
+        });
+        
+        if (parameters.Any())
+        {
+            sb.AppendLine();
+            sb.AppendLine("        " + string.Join(",\n        ", parameters) + ")");
+        }
+        else
+        {
+            sb.AppendLine(")");
+        }
+        
+        sb.AppendLine("    {");
+        
+        if (!string.IsNullOrEmpty(tool.Implementation))
+        {
+            // Use custom implementation
+            sb.AppendLine($"        {tool.Implementation}");
+        }
+        else
+        {
+            // Generate default implementation
+            sb.AppendLine($"        _logger.LogInformation(\"{tool.Name} called\");");
+            sb.AppendLine("        ");
+            sb.AppendLine($"        // TODO: Implement {tool.Name} logic");
+            sb.AppendLine("        await Task.Delay(100);");
+            sb.AppendLine("        ");
+            sb.AppendLine($"        return \"✅ {tool.Name} executed successfully\";");
+        }
+        
+        sb.AppendLine("    }");
+        
+        return sb.ToString();
+    }
+
+    private string GenerateMcpServerConfig(ServerSpec spec)
+    {
+        var sb = new StringBuilder();
+        
+        sb.AppendLine("{");
+        sb.AppendLine("  \"$schema\": \"https://modelcontextprotocol.io/schemas/draft/2025-07-09/server.json\",");
+        sb.AppendLine($"  \"description\": \"{spec.Description}\",");
+        sb.AppendLine($"  \"name\": \"io.generated.{spec.Name}McpServer\",");
+        sb.AppendLine("  \"packages\": [");
+        sb.AppendLine("    {");
+        sb.AppendLine("      \"registry_name\": \"nuget\",");
+        sb.AppendLine($"      \"name\": \"{spec.Name}McpServer\",");
+        sb.AppendLine("      \"version\": \"1.0.0\",");
+        sb.AppendLine("      \"package_arguments\": [],");
+        sb.AppendLine("      \"environment_variables\": []");
+        sb.AppendLine("    }");
+        sb.AppendLine("  ],");
+        sb.AppendLine("  \"repository\": {");
+        sb.AppendLine($"    \"url\": \"https://github.com/generated/{spec.Name.ToLower()}-mcp-server\",");
+        sb.AppendLine("    \"source\": \"github\"");
+        sb.AppendLine("  },");
+        sb.AppendLine("  \"version_detail\": {");
+        sb.AppendLine("    \"version\": \"1.0.0\"");
+        sb.AppendLine("  }");
+        sb.AppendLine("}");
+        
+        return sb.ToString();
+    }
+
+    private string GenerateGitIgnore()
+    {
+        return """
+        bin/
+        obj/
+        *.user
+        .vs/
+        *.log
+        .vscode/settings.json
+        """;
+    }
+
+    private string InsertMethodIntoClass(string existingContent, string newMethod)
+    {
+        var lastBraceIndex = existingContent.LastIndexOf('}');
+        if (lastBraceIndex > 0)
+        {
+            return existingContent.Insert(lastBraceIndex, "\n" + newMethod + "\n");
+        }
+        return existingContent + "\n" + newMethod;
+    }
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schemas/draft/2025-07-09/server.json",
+  "description": "Master MCP Server - The ultimate MCP orchestrator that creates, manages, and controls other MCP servers. Features include automatic code generation, server lifecycle management, VS Code configuration updates, and comprehensive monitoring capabilities.",
+  "name": "io.mastermcp.MasterMcpServer",
+  "packages": [
+    {
+      "registry_name": "nuget",
+      "name": "MasterMcpServer",
+      "version": "1.0.0",
+      "package_arguments": [],
+      "environment_variables": [
+        {
+          "name": "MASTER_MCP_LOG_LEVEL",
+          "description": "Logging level for Master MCP Server (Trace, Debug, Information, Warning, Error, Critical)",
+          "required": false
+        },
+        {
+          "name": "MASTER_MCP_SERVER_PATH",
+          "description": "Base path where new MCP servers will be created. Defaults to ~/Documents",
+          "required": false
+        },
+        {
+          "name": "MASTER_MCP_AUTO_START",
+          "description": "Automatically start servers after creation (true/false). Default: false",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/fastmcp/master-mcp-server",
+    "source": "github"
+  },
+  "version_detail": {
+    "version": "1.0.0"
+  }
+}

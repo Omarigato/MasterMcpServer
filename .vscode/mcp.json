@@ -1,0 +1,18 @@
+{
+	"servers": {
+		"master-mcp-server": {
+			"type": "stdio",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"C:\\Users\\o.akim\\Documents\\MasterMcpServer\\MasterMcpServer.csproj"
+			],
+			"env": {
+				"ASPNETCORE_ENVIRONMENT": "Development",
+				"MASTER_MCP_LOG_LEVEL": "Information"
+			}
+		}
+	},
+	"inputs": []
+}

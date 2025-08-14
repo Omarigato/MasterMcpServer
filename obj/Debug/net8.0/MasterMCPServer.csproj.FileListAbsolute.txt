@@ -1,0 +1,5 @@
+C:\Users\o.akim\Documents\MasterMcpServer\obj\Debug\net8.0\MasterMCPServer.csproj.AssemblyReference.cache
+C:\Users\o.akim\Documents\MasterMcpServer\obj\Debug\net8.0\MasterMCPServer.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\o.akim\Documents\MasterMcpServer\obj\Debug\net8.0\MasterMCPServer.AssemblyInfoInputs.cache
+C:\Users\o.akim\Documents\MasterMcpServer\obj\Debug\net8.0\MasterMCPServer.AssemblyInfo.cs
+C:\Users\o.akim\Documents\MasterMcpServer\obj\Debug\net8.0\MasterMCPServer.csproj.CoreCompileInputs.cache
